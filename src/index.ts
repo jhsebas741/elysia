@@ -367,10 +367,7 @@ const app = new Elysia()
       }
     },
   })
-  .listen({
-    hostname: "0.0.0.0",
-    port: 3000,
-  });
+  .listen({});
 
 function approveMessage(messageId: string) {
   const pending = pendingMessages.get(messageId);
