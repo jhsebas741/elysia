@@ -1,15 +1,19 @@
 import openapi, { fromTypes } from "@elysiajs/openapi";
 import staticPlugin from "@elysiajs/static";
-import { Elysia } from "elysia";
+import { Context, Elysia, t } from "elysia";
+import { Prettify, RouteBase } from "elysia/dist/types";
+import { ElysiaWS } from "elysia/dist/ws";
 
 // ⚙️ CONFIGURACIÓN
-const ADMIN_PASSWORD = "admin123"; // Contraseña secreta del admin
-const MODERATION_TIME = 3000; // Tiempo en milisegundos para aprobar/rechazar (3000ms = 3s)
+const ADMIN_PASSWORD = "4dm1n_Chat$"; // Contraseña secreta del admin
+const MODERATION_TIME = 5000; // Tiempo en milisegundos para aprobar/rechazar (5000ms = 5s)
+const MESSAGE_COOLDOWN = 5000; // Tiempo en milisegundos entre mensajes (5000ms = 5s)
 
 interface User {
   username: string;
-  ws: any;
+  ws: Prettify<ElysiaWS<Context, RouteBase>>;
   isAdmin?: boolean;
+  lastMessageTime?: number;
 }
 
 interface PendingMessage {
@@ -21,10 +25,30 @@ interface PendingMessage {
   timer?: NodeJS.Timeout;
 }
 
+interface HistoryMessage {
+  id: string;
+  username: string;
+  message: string;
+  timestamp: string;
+  status: "approved" | "rejected";
+}
+
 interface ChatMessage {
-  type: "message" | "join" | "user_joined" | "user_left" | "online_users" | 
-        "message_pending" | "message_approved" | "message_rejected" | 
-        "pending_message" | "admin_joined";
+  type:
+    | "message"
+    | "join"
+    | "join_success"
+    | "join_error"
+    | "user_joined"
+    | "user_left"
+    | "online_users"
+    | "message_pending"
+    | "message_approved"
+    | "message_rejected"
+    | "pending_message"
+    | "admin_joined"
+    | "chat_history"
+    | "cooldown_error";
   username?: string;
   message?: string;
   timestamp?: string;
@@ -32,11 +56,15 @@ interface ChatMessage {
   messageId?: string;
   pendingMessage?: PendingMessage;
   remainingTime?: number;
+  error?: string;
+  history?: HistoryMessage[];
+  cooldownRemaining?: number;
 }
 
 const users = new Map<string, User>();
 const pendingMessages = new Map<string, PendingMessage>();
-let adminWs: any = null;
+const messageHistory: HistoryMessage[] = [];
+let adminWs: Prettify<ElysiaWS<Context, RouteBase>> | null = null;
 
 const app = new Elysia()
   .use(
@@ -50,14 +78,21 @@ const app = new Elysia()
     })
   )
   // Endpoint para validar contraseña de admin
-  .post("/api/admin/validate", ({ body }: any) => {
-    const { password } = body;
-    return { valid: password === ADMIN_PASSWORD };
-  })
+  .post(
+    "/api/admin/validate",
+    ({ body }) => {
+      const { password } = body;
+      return { valid: password === ADMIN_PASSWORD };
+    },
+    {
+      body: t.Object({
+        password: t.String(),
+      }),
+    }
+  )
   .ws("/chat", {
     open(ws) {
       console.log("Cliente conectado");
-      ws.subscribe("chat");
     },
 
     message(ws, message: ChatMessage) {
@@ -66,7 +101,27 @@ const app = new Elysia()
 
         if (data.type === "join" && data.username) {
           const isAdmin = data.username === "__ADMIN__";
-          
+
+          // Validar que el nombre de usuario no esté en uso
+          if (!isAdmin) {
+            const usernameExists = Array.from(users.values()).some(
+              (u) =>
+                !u.isAdmin &&
+                u.username.toLowerCase() === data.username!.toLowerCase()
+            );
+
+            if (usernameExists) {
+              // Enviar error al cliente
+              const errorMessage: ChatMessage = {
+                type: "join_error",
+                error:
+                  "El nombre de usuario ya está en uso. Por favor elige otro.",
+              };
+              ws.send(JSON.stringify(errorMessage));
+              return;
+            }
+          }
+
           users.set(ws.id, {
             username: data.username,
             ws: ws,
@@ -76,7 +131,20 @@ const app = new Elysia()
           if (isAdmin) {
             adminWs = ws;
             console.log("Admin conectado");
-            
+
+            // Enviar confirmación de conexión exitosa
+            const successMessage: ChatMessage = {
+              type: "join_success",
+            };
+            ws.send(JSON.stringify(successMessage));
+
+            // Enviar historial completo al admin
+            const historyMessage: ChatMessage = {
+              type: "chat_history",
+              history: messageHistory,
+            };
+            ws.send(JSON.stringify(historyMessage));
+
             // Enviar mensajes pendientes actuales al admin
             pendingMessages.forEach((pending) => {
               const adminMessage: ChatMessage = {
@@ -86,6 +154,12 @@ const app = new Elysia()
               ws.send(JSON.stringify(adminMessage));
             });
           } else {
+            // Enviar confirmación de conexión exitosa al usuario
+            const successMessage: ChatMessage = {
+              type: "join_success",
+            };
+            ws.send(JSON.stringify(successMessage));
+
             // Notificar a todos que se unió un usuario
             const joinMessage: ChatMessage = {
               type: "user_joined",
@@ -96,7 +170,7 @@ const app = new Elysia()
 
             // Enviar lista de usuarios en línea (sin incluir admin)
             const onlineUsers = Array.from(users.values())
-              .filter(u => !u.isAdmin)
+              .filter((u) => !u.isAdmin)
               .map((u) => u.username);
             const usersMessage: ChatMessage = {
               type: "online_users",
@@ -114,6 +188,26 @@ const app = new Elysia()
         if (data.type === "message" && data.message) {
           const user = users.get(ws.id);
           if (!user || user.isAdmin) return;
+
+          // Verificar cooldown
+          const now = Date.now();
+          if (user.lastMessageTime) {
+            const timeSinceLastMessage = now - user.lastMessageTime;
+            const cooldownRemaining = MESSAGE_COOLDOWN - timeSinceLastMessage;
+
+            if (cooldownRemaining > 0) {
+              // Enviar error de cooldown
+              const cooldownError: ChatMessage = {
+                type: "cooldown_error",
+                cooldownRemaining: Math.ceil(cooldownRemaining / 1000),
+              };
+              ws.send(JSON.stringify(cooldownError));
+              return;
+            }
+          }
+
+          // Actualizar tiempo del último mensaje
+          user.lastMessageTime = now;
 
           // Crear mensaje pendiente
           const messageId = `${ws.id}-${Date.now()}`;
@@ -195,7 +289,7 @@ const app = new Elysia()
 
           // Actualizar lista de usuarios en línea
           const onlineUsers = Array.from(users.values())
-            .filter(u => !u.isAdmin)
+            .filter((u) => !u.isAdmin)
             .map((u) => u.username);
           const usersMessage: ChatMessage = {
             type: "online_users",
@@ -212,8 +306,8 @@ const app = new Elysia()
     },
   })
   .listen({
-    hostname: '0.0.0.0',
-    port: 3000
+    hostname: "0.0.0.0",
+    port: 3000,
   });
 
 function approveMessage(messageId: string) {
@@ -225,7 +319,16 @@ function approveMessage(messageId: string) {
     clearTimeout(pending.timer);
   }
 
-  // Enviar mensaje aprobado a todos los usuarios
+  // Agregar al historial
+  messageHistory.push({
+    id: messageId,
+    username: pending.username,
+    message: pending.message,
+    timestamp: pending.timestamp,
+    status: "approved",
+  });
+
+  // Enviar mensaje aprobado a todos los usuarios EXCEPTO al que lo envió
   const chatMessage: ChatMessage = {
     type: "message",
     username: pending.username,
@@ -234,7 +337,7 @@ function approveMessage(messageId: string) {
   };
 
   users.forEach((user) => {
-    if (!user.isAdmin) {
+    if (!user.isAdmin && user.ws.id !== pending.userId) {
       user.ws.send(JSON.stringify(chatMessage));
     }
   });
@@ -247,6 +350,15 @@ function approveMessage(messageId: string) {
       messageId: messageId,
     };
     senderUser.ws.send(JSON.stringify(approvedNotification));
+  }
+
+  // Notificar al admin con el historial actualizado
+  if (adminWs) {
+    const historyMessage: ChatMessage = {
+      type: "chat_history",
+      history: messageHistory,
+    };
+    adminWs.send(JSON.stringify(historyMessage));
   }
 
   // Remover de pendientes
@@ -262,6 +374,15 @@ function rejectMessage(messageId: string) {
     clearTimeout(pending.timer);
   }
 
+  // Agregar al historial
+  messageHistory.push({
+    id: messageId,
+    username: pending.username,
+    message: pending.message,
+    timestamp: pending.timestamp,
+    status: "rejected",
+  });
+
   // Notificar al usuario que su mensaje fue rechazado
   const senderUser = users.get(pending.userId);
   if (senderUser) {
@@ -270,6 +391,15 @@ function rejectMessage(messageId: string) {
       messageId: messageId,
     };
     senderUser.ws.send(JSON.stringify(rejectedNotification));
+  }
+
+  // Notificar al admin con el historial actualizado
+  if (adminWs) {
+    const historyMessage: ChatMessage = {
+      type: "chat_history",
+      history: messageHistory,
+    };
+    adminWs.send(JSON.stringify(historyMessage));
   }
 
   // Remover de pendientes

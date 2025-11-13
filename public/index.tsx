@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-
 import { createRoot } from "react-dom/client";
-
 import "@public/styles/global.css";
 
 // ⚙️ CONFIGURACIÓN
-const ADMIN_PASSWORD = "admin123"; // Contraseña secreta del admin
-const MODERATION_TIME = 5; // Tiempo en segundos para aprobar/rechazar
+const ADMIN_PASSWORD = "4dm1n_Chat$";
+const MODERATION_TIME = 5;
 
 interface Message {
   username: string;
@@ -26,23 +24,38 @@ interface PendingMessage {
   remainingTime: number;
 }
 
+interface HistoryMessage {
+  id: string;
+  username: string;
+  message: string;
+  timestamp: string;
+  status: "approved" | "rejected";
+}
+
 interface WebSocketMessage {
   type:
     | "message"
     | "join"
+    | "join_success"
+    | "join_error"
     | "user_joined"
     | "user_left"
     | "online_users"
     | "message_pending"
     | "message_approved"
     | "message_rejected"
-    | "pending_message";
+    | "pending_message"
+    | "chat_history"
+    | "cooldown_error";
   username?: string;
   message?: string;
   timestamp?: string;
   users?: string[];
   messageId?: string;
   pendingMessage?: PendingMessage;
+  error?: string;
+  history?: HistoryMessage[];
+  cooldownRemaining?: number;
 }
 
 export default function App() {
@@ -53,9 +66,15 @@ export default function App() {
   const [inputMessage, setInputMessage] = useState<string>("");
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [pendingQueue, setPendingQueue] = useState<PendingMessage[]>([]);
+  const [chatHistory, setChatHistory] = useState<HistoryMessage[]>([]);
+  const [connectionError, setConnectionError] = useState<string>("");
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+  const [showCooldownError, setShowCooldownError] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -68,12 +87,16 @@ export default function App() {
   useEffect(() => {
     return () => {
       timersRef.current.forEach((timer) => clearInterval(timer));
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
 
   const connectToChat = async () => {
-    if (!username.trim()) return;
+    if (!username.trim() || isConnecting) return;
+
+    setConnectionError("");
+    setIsConnecting(true);
 
     // Verificar si es el admin
     if (username === ADMIN_PASSWORD) {
@@ -93,6 +116,9 @@ export default function App() {
         }
       } catch (err) {
         console.error("Error validando admin:", err);
+        setConnectionError("Error al conectar. Intenta de nuevo.");
+        setIsConnecting(false);
+        return;
       }
     }
 
@@ -111,11 +137,20 @@ export default function App() {
         username: "__ADMIN__",
       };
       ws.send(JSON.stringify(joinMessage));
-      setIsConnected(true);
     };
 
     ws.onmessage = (event) => {
       const data: WebSocketMessage = JSON.parse(event.data);
+
+      if (data.type === "join_success") {
+        setIsConnected(true);
+        setIsConnecting(false);
+        setConnectionError("");
+      }
+
+      if (data.type === "chat_history" && data.history) {
+        setChatHistory(data.history);
+      }
 
       if (data.type === "pending_message" && data.pendingMessage) {
         const pending = {
@@ -125,6 +160,11 @@ export default function App() {
         setPendingQueue((prev) => [...prev, pending]);
         startCountdown(pending.id);
       }
+    };
+
+    ws.onerror = () => {
+      setConnectionError("Error de conexión. Intenta de nuevo.");
+      setIsConnecting(false);
     };
 
     wsRef.current = ws;
@@ -141,11 +181,25 @@ export default function App() {
         username: username,
       };
       ws.send(JSON.stringify(joinMessage));
-      setIsConnected(true);
     };
 
     ws.onmessage = (event) => {
       const data: WebSocketMessage = JSON.parse(event.data);
+
+      if (data.type === "join_success") {
+        setIsConnected(true);
+        setIsConnecting(false);
+        setConnectionError("");
+      }
+
+      if (data.type === "join_error" && data.error) {
+        setConnectionError(data.error);
+        setIsConnecting(false);
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
+        }
+      }
 
       if (data.type === "message_pending" && data.messageId) {
         setMessages((prev) => [
@@ -182,16 +236,22 @@ export default function App() {
       }
 
       if (data.type === "message") {
-        setMessages((prev) => [
-          ...prev,
-          {
-            username: data.username || "",
-            message: data.message || "",
-            timestamp: data.timestamp || new Date().toISOString(),
-            isOwn: data.username === username,
-            status: "approved",
-          },
-        ]);
+        setMessages((prev) => {
+          if (data.username === username) {
+            return prev;
+          }
+
+          return [
+            ...prev,
+            {
+              username: data.username || "",
+              message: data.message || "",
+              timestamp: data.timestamp || new Date().toISOString(),
+              isOwn: false,
+              status: "approved",
+            },
+          ];
+        });
       }
 
       if (data.type === "user_joined") {
@@ -221,6 +281,35 @@ export default function App() {
       if (data.type === "online_users" && data.users) {
         setOnlineUsers(data.users);
       }
+
+      if (data.type === "cooldown_error" && data.cooldownRemaining) {
+        setCooldownRemaining(data.cooldownRemaining);
+        setShowCooldownError(true);
+
+        // Iniciar countdown visual
+        if (cooldownTimerRef.current) {
+          clearInterval(cooldownTimerRef.current);
+        }
+
+        let remaining = data.cooldownRemaining;
+        cooldownTimerRef.current = setInterval(() => {
+          remaining--;
+          setCooldownRemaining(remaining);
+
+          if (remaining <= 0) {
+            setShowCooldownError(false);
+            if (cooldownTimerRef.current) {
+              clearInterval(cooldownTimerRef.current);
+              cooldownTimerRef.current = null;
+            }
+          }
+        }, 1000);
+      }
+    };
+
+    ws.onerror = () => {
+      setConnectionError("Error de conexión. Intenta de nuevo.");
+      setIsConnecting(false);
     };
 
     wsRef.current = ws;
@@ -284,7 +373,6 @@ export default function App() {
     setPendingQueue((prev) => prev.filter((msg) => msg.id !== messageId));
   };
 
-  // Atajos de teclado para admin
   useEffect(() => {
     if (!isAdmin || !isConnected) return;
 
@@ -305,7 +393,7 @@ export default function App() {
   }, [pendingQueue, isAdmin, isConnected]);
 
   const sendMessage = () => {
-    if (!inputMessage.trim() || !wsRef.current) return;
+    if (!inputMessage.trim() || !wsRef.current || cooldownRemaining > 0) return;
 
     const messageData: WebSocketMessage = {
       type: "message",
@@ -313,6 +401,27 @@ export default function App() {
     };
     wsRef.current.send(JSON.stringify(messageData));
     setInputMessage("");
+
+    // Iniciar cooldown inmediatamente después de enviar
+    setCooldownRemaining(5);
+    setShowCooldownError(false);
+
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+    }
+
+    let remaining = 5;
+    cooldownTimerRef.current = setInterval(() => {
+      remaining--;
+      setCooldownRemaining(remaining);
+
+      if (remaining <= 0) {
+        if (cooldownTimerRef.current) {
+          clearInterval(cooldownTimerRef.current);
+          cooldownTimerRef.current = null;
+        }
+      }
+    }, 1000);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -336,8 +445,15 @@ export default function App() {
     setOnlineUsers([]);
     setPendingQueue([]);
     setUsername("");
+    setConnectionError("");
+    setCooldownRemaining(0);
+    setShowCooldownError(false);
     timersRef.current.forEach((timer) => clearInterval(timer));
     timersRef.current.clear();
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
+    }
   };
 
   const formatTime = (timestamp: string): string => {
@@ -376,6 +492,19 @@ export default function App() {
               Chat moderado
             </p>
           </div>
+
+          {connectionError && (
+            <div className="mb-5 bg-red-50 border-2 border-red-300 rounded-xl p-4 animate-in slide-in-from-top">
+              <div className="flex items-center space-x-2">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <p className="font-bold text-red-800 text-sm">Error</p>
+                  <p className="text-red-700 text-sm">{connectionError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-5">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -384,19 +513,30 @@ export default function App() {
               <input
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setConnectionError("");
+                }}
                 onKeyPress={handleKeyPress}
                 placeholder="Ej: ChismosoAnónimo..."
                 className="w-full px-4 py-3 border-3 border-amber-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-amber-200 focus:border-amber-500 transition-all text-gray-800 placeholder-gray-400 font-medium"
                 maxLength={20}
+                disabled={isConnecting}
               />
             </div>
             <button
               onClick={connectToChat}
-              disabled={!username.trim()}
+              disabled={!username.trim() || isConnecting}
               className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-4 rounded-xl font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none text-lg"
             >
-              ¡Entrar al Chisme!
+              {isConnecting ? (
+                <span className="flex items-center justify-center space-x-2">
+                  <span className="animate-spin">⏳</span>
+                  <span>Conectando...</span>
+                </span>
+              ) : (
+                "¡Entrar al Chisme!"
+              )}
             </button>
           </div>
         </div>
@@ -407,7 +547,7 @@ export default function App() {
   if (isAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 p-3 sm:p-4">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="bg-gradient-to-r from-slate-700 to-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 mb-4 border border-slate-600">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center space-x-3">
@@ -419,7 +559,8 @@ export default function App() {
                     Panel del Moderador
                   </h1>
                   <p className="text-amber-400 text-xs sm:text-sm font-semibold">
-                    Chismes en revisión: {pendingQueue.length}
+                    Chismes en revisión: {pendingQueue.length} | Historial:{" "}
+                    {chatHistory.length}
                   </p>
                 </div>
               </div>
@@ -432,93 +573,150 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 border border-slate-700">
-            <div className="mb-4 sm:mb-6 flex items-center justify-between flex-wrap gap-2">
-              <h2 className="text-lg sm:text-xl font-bold text-white flex items-center space-x-2">
-                <span>📋</span>
-                <span>Cola de Chismes</span>
-              </h2>
-              <div className="text-xs sm:text-sm text-slate-300 bg-slate-700 px-3 py-2 rounded-lg">
-                <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-amber-400">
-                  A
-                </kbd>{" "}
-                Aprobar ·
-                <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-red-400 ml-1">
-                  R
-                </kbd>{" "}
-                Rechazar
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Cola de Mensajes Pendientes */}
+            <div className="bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 border border-slate-700">
+              <div className="mb-4 sm:mb-6">
+                <h2 className="text-lg sm:text-xl font-bold text-white flex items-center space-x-2 mb-2">
+                  <span>📋</span>
+                  <span>Cola de Moderación</span>
+                </h2>
+                <div className="text-xs sm:text-sm text-slate-300 bg-slate-700 px-3 py-2 rounded-lg inline-block">
+                  <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-amber-400">
+                    A
+                  </kbd>{" "}
+                  Aprobar ·
+                  <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-red-400 ml-1">
+                    R
+                  </kbd>{" "}
+                  Rechazar
+                </div>
+              </div>
+
+              <div className="max-h-[calc(100vh-20rem)] overflow-y-auto space-y-3 pr-2">
+                {pendingQueue.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <div className="text-5xl mb-3">🤐</div>
+                    <p className="text-base font-semibold">
+                      Todo tranquilo por ahora...
+                    </p>
+                    <p className="text-xs mt-1">No hay chismes pendientes</p>
+                  </div>
+                ) : (
+                  pendingQueue.map((msg, idx) => (
+                    <div
+                      key={msg.id}
+                      className={`border-3 rounded-xl p-3 sm:p-4 transition-all ${
+                        idx === 0
+                          ? "border-amber-500 bg-gradient-to-br from-amber-900/20 to-orange-900/20 shadow-lg shadow-amber-500/20"
+                          : "border-slate-600 bg-slate-700/50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between mb-3 gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center flex-wrap gap-2 mb-2">
+                            <span className="font-bold text-amber-400 flex items-center space-x-1 text-sm">
+                              <span>💬</span>
+                              <span className="truncate">{msg.username}</span>
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {new Date(msg.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <p className="text-white text-sm break-words">
+                            {msg.message}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-center justify-center min-w-[50px]">
+                          <div
+                            className={`text-2xl font-black ${
+                              msg.remainingTime <= 1
+                                ? "text-red-500 animate-pulse"
+                                : "text-amber-400"
+                            }`}
+                          >
+                            {msg.remainingTime}s
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => approveMessage(msg.id)}
+                          className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold transition-all text-xs sm:text-sm"
+                        >
+                          ✓ {idx === 0 && "(A)"}
+                        </button>
+                        <button
+                          onClick={() => rejectMessage(msg.id)}
+                          className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-bold transition-all text-xs sm:text-sm"
+                        >
+                          ✕ {idx === 0 && "(R)"}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
-            {pendingQueue.length === 0 ? (
-              <div className="text-center py-16 text-slate-400">
-                <div className="text-6xl mb-4">🤐</div>
-                <p className="text-lg font-semibold">
-                  Todo tranquilo por ahora...
-                </p>
-                <p className="text-sm mt-2">
-                  No hay chismes pendientes de revisar
+            {/* Historial de Chat */}
+            <div className="bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 border border-slate-700">
+              <div className="mb-4 sm:mb-6">
+                <h2 className="text-lg sm:text-xl font-bold text-white flex items-center space-x-2">
+                  <span>📜</span>
+                  <span>Historial del Chat</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Mensajes aprobados y rechazados
                 </p>
               </div>
-            ) : (
-              <div className="space-y-3 sm:space-y-4">
-                {pendingQueue.map((msg, idx) => (
-                  <div
-                    key={msg.id}
-                    className={`border-3 rounded-xl sm:rounded-2xl p-3 sm:p-4 transition-all ${
-                      idx === 0
-                        ? "border-amber-500 bg-gradient-to-br from-amber-900/20 to-orange-900/20 shadow-lg shadow-amber-500/20"
-                        : "border-slate-600 bg-slate-700/50"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-3 gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-2 mb-2">
-                          <span className="font-bold text-amber-400 flex items-center space-x-1">
-                            <span>💬</span>
-                            <span className="truncate">{msg.username}</span>
-                          </span>
-                          <span className="text-xs text-slate-400">
-                            {new Date(msg.timestamp).toLocaleTimeString()}
-                          </span>
-                        </div>
-                        <p className="text-white font-medium break-words text-sm sm:text-base">
-                          {msg.message}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-center justify-center min-w-[60px] sm:min-w-[70px]">
-                        <div
-                          className={`text-2xl sm:text-3xl font-black ${
-                            msg.remainingTime <= 1
-                              ? "text-red-500 animate-pulse"
-                              : "text-amber-400"
-                          }`}
-                        >
-                          {msg.remainingTime}s
-                        </div>
-                        <div className="text-xs text-slate-400 font-semibold">
-                          quedan
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => approveMessage(msg.id)}
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 sm:py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-green-500/30 text-sm sm:text-base"
-                      >
-                        ✓ Aprobar {idx === 0 && "(A)"}
-                      </button>
-                      <button
-                        onClick={() => rejectMessage(msg.id)}
-                        className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 sm:py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-red-500/30 text-sm sm:text-base"
-                      >
-                        ✕ Rechazar {idx === 0 && "(R)"}
-                      </button>
-                    </div>
+
+              <div className="max-h-[calc(100vh-20rem)] overflow-y-auto space-y-2 pr-2">
+                {chatHistory.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <div className="text-5xl mb-3">📭</div>
+                    <p className="text-base font-semibold">Sin historial aún</p>
+                    <p className="text-xs mt-1">
+                      Los mensajes moderados aparecerán aquí
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  [...chatHistory].reverse().map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`rounded-lg p-3 border-l-4 ${
+                        msg.status === "approved"
+                          ? "bg-green-900/20 border-green-500"
+                          : "bg-red-900/20 border-red-500"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="flex items-center space-x-2 min-w-0">
+                          <span
+                            className={`text-lg flex-shrink-0 ${
+                              msg.status === "approved"
+                                ? "text-green-400"
+                                : "text-red-400"
+                            }`}
+                          >
+                            {msg.status === "approved" ? "✓" : "✕"}
+                          </span>
+                          <span className="font-bold text-white text-sm truncate">
+                            {msg.username}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-400 flex-shrink-0">
+                          {new Date(msg.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <p className="text-slate-200 text-sm break-words ml-7">
+                        {msg.message}
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
@@ -668,7 +866,7 @@ export default function App() {
               />
               <button
                 onClick={sendMessage}
-                disabled={!inputMessage.trim()}
+                disabled={!inputMessage.trim() || cooldownRemaining > 0}
                 className="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none text-sm sm:text-base flex-shrink-0"
               >
                 <span className="hidden sm:inline">Enviar</span>
