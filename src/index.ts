@@ -48,7 +48,9 @@ interface ChatMessage {
     | "pending_message"
     | "admin_joined"
     | "chat_history"
-    | "cooldown_error";
+    | "cooldown_error"
+    | "clear_history"
+    | "kick_all_users";
   username?: string;
   message?: string;
   timestamp?: string;
@@ -263,6 +265,66 @@ const app = new Elysia()
           if (!user || !user.isAdmin) return;
 
           rejectMessage(data.messageId);
+        }
+
+        // Admin limpia el historial
+        if (data.type === "clear_history") {
+          const user = users.get(ws.id);
+          if (!user || !user.isAdmin) return;
+
+          // Limpiar el historial del servidor
+          messageHistory.length = 0;
+
+          // Notificar al admin que el historial se limpió
+          const historyMessage: ChatMessage = {
+            type: "chat_history",
+            history: [],
+          };
+          ws.send(JSON.stringify(historyMessage));
+
+          console.log("Admin limpió el historial");
+        }
+
+        // Admin expulsa a todos los usuarios
+        if (data.type === "kick_all_users") {
+          const user = users.get(ws.id);
+          if (!user || !user.isAdmin) return;
+
+          console.log("Admin expulsando a todos los usuarios...");
+
+          // Enviar mensaje de expulsión a todos los usuarios (excepto admin)
+          const kickMessage: ChatMessage = {
+            type: "kick_all_users",
+          };
+
+          users.forEach((u) => {
+            if (!u.isAdmin) {
+              u.ws.send(JSON.stringify(kickMessage));
+              // Cerrar la conexión después de enviar el mensaje
+              setTimeout(() => {
+                u.ws.close();
+              }, 100);
+            }
+          });
+
+          // Limpiar usuarios (mantener solo admin)
+          const adminUser = Array.from(users.entries()).find(
+            ([_, u]) => u.isAdmin
+          );
+          users.clear();
+          if (adminUser) {
+            users.set(adminUser[0], adminUser[1]);
+          }
+
+          // Limpiar mensajes pendientes
+          pendingMessages.forEach((pending) => {
+            if (pending.timer) {
+              clearTimeout(pending.timer);
+            }
+          });
+          pendingMessages.clear();
+
+          console.log("Todos los usuarios fueron expulsados");
         }
       } catch (error) {
         console.error("Error procesando mensaje:", error);

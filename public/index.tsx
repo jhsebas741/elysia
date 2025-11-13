@@ -46,7 +46,9 @@ interface WebSocketMessage {
     | "message_rejected"
     | "pending_message"
     | "chat_history"
-    | "cooldown_error";
+    | "cooldown_error"
+    | "clear_history"
+    | "kick_all_users";
   username?: string;
   message?: string;
   timestamp?: string;
@@ -150,6 +152,12 @@ export default function App() {
 
       if (data.type === "chat_history" && data.history) {
         setChatHistory(data.history);
+      }
+
+      if (data.type === "kick_all_users") {
+        // Limpiar todo y desconectar
+        alert("El administrador ha limpiado el chat. Serás desconectado.");
+        disconnectFromChat();
       }
 
       if (data.type === "pending_message" && data.pendingMessage) {
@@ -282,6 +290,12 @@ export default function App() {
         setOnlineUsers(data.users);
       }
 
+      if (data.type === "kick_all_users") {
+        // Limpiar todo y desconectar
+        alert("El administrador ha limpiado el chat. Serás desconectado.");
+        disconnectFromChat();
+      }
+
       if (data.type === "cooldown_error" && data.cooldownRemaining) {
         setCooldownRemaining(data.cooldownRemaining);
         setShowCooldownError(true);
@@ -371,6 +385,36 @@ export default function App() {
       timersRef.current.delete(messageId);
     }
     setPendingQueue((prev) => prev.filter((msg) => msg.id !== messageId));
+  };
+
+  const clearHistory = () => {
+    if (!wsRef.current) return;
+
+    if (
+      confirm(
+        "¿Estás seguro de que quieres limpiar todo el historial? Esta acción no se puede deshacer."
+      )
+    ) {
+      const message: WebSocketMessage = {
+        type: "clear_history",
+      };
+      wsRef.current.send(JSON.stringify(message));
+    }
+  };
+
+  const kickAllUsers = () => {
+    if (!wsRef.current) return;
+
+    if (
+      confirm(
+        "¿Estás seguro de que quieres expulsar a todos los usuarios y limpiar el chat? Esta acción desconectará a todos."
+      )
+    ) {
+      const message: WebSocketMessage = {
+        type: "kick_all_users",
+      };
+      wsRef.current.send(JSON.stringify(message));
+    }
   };
 
   useEffect(() => {
@@ -564,12 +608,30 @@ export default function App() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={disconnectFromChat}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-sm sm:text-base"
-              >
-                Salir
-              </button>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={clearHistory}
+                  className="bg-orange-600 hover:bg-orange-700 text-white px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-xs sm:text-sm flex items-center space-x-1"
+                  title="Limpiar historial del admin"
+                >
+                  <span>🗑️</span>
+                  <span className="hidden sm:inline">Limpiar Historial</span>
+                </button>
+                <button
+                  onClick={kickAllUsers}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-xs sm:text-sm flex items-center space-x-1"
+                  title="Expulsar a todos y reiniciar chat"
+                >
+                  <span>💥</span>
+                  <span className="hidden sm:inline">Expulsar Todos</span>
+                </button>
+                <button
+                  onClick={disconnectFromChat}
+                  className="bg-red-600 hover:bg-red-700 text-white px-3 sm:px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-xs sm:text-sm"
+                >
+                  Salir
+                </button>
+              </div>
             </div>
           </div>
 
