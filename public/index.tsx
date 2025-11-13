@@ -27,8 +27,16 @@ interface PendingMessage {
 }
 
 interface WebSocketMessage {
-  type: "message" | "join" | "user_joined" | "user_left" | "online_users" | 
-        "message_pending" | "message_approved" | "message_rejected" | "pending_message";
+  type:
+    | "message"
+    | "join"
+    | "user_joined"
+    | "user_left"
+    | "online_users"
+    | "message_pending"
+    | "message_approved"
+    | "message_rejected"
+    | "pending_message";
   username?: string;
   message?: string;
   timestamp?: string;
@@ -59,7 +67,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      timersRef.current.forEach(timer => clearInterval(timer));
+      timersRef.current.forEach((timer) => clearInterval(timer));
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
@@ -110,7 +118,10 @@ export default function App() {
       const data: WebSocketMessage = JSON.parse(event.data);
 
       if (data.type === "pending_message" && data.pendingMessage) {
-        const pending = { ...data.pendingMessage, remainingTime: MODERATION_TIME };
+        const pending = {
+          ...data.pendingMessage,
+          remainingTime: MODERATION_TIME,
+        };
         setPendingQueue((prev) => [...prev, pending]);
         startCountdown(pending.id);
       }
@@ -153,7 +164,9 @@ export default function App() {
       if (data.type === "message_approved" && data.messageId) {
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.messageId === data.messageId ? { ...msg, status: "approved" } : msg
+            msg.messageId === data.messageId
+              ? { ...msg, status: "approved" }
+              : msg
           )
         );
       }
@@ -161,7 +174,9 @@ export default function App() {
       if (data.type === "message_rejected" && data.messageId) {
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.messageId === data.messageId ? { ...msg, status: "rejected" } : msg
+            msg.messageId === data.messageId
+              ? { ...msg, status: "rejected" }
+              : msg
           )
         );
       }
@@ -214,18 +229,20 @@ export default function App() {
   const startCountdown = (messageId: string) => {
     const timer = setInterval(() => {
       setPendingQueue((prev) => {
-        const updated = prev.map((msg) => {
-          if (msg.id === messageId) {
-            const newTime = msg.remainingTime - 1;
-            if (newTime <= 0) {
-              clearInterval(timer);
-              timersRef.current.delete(messageId);
-              return null;
+        const updated = prev
+          .map((msg) => {
+            if (msg.id === messageId) {
+              const newTime = msg.remainingTime - 1;
+              if (newTime <= 0) {
+                clearInterval(timer);
+                timersRef.current.delete(messageId);
+                return null;
+              }
+              return { ...msg, remainingTime: newTime };
             }
-            return { ...msg, remainingTime: newTime };
-          }
-          return msg;
-        }).filter(Boolean) as PendingMessage[];
+            return msg;
+          })
+          .filter(Boolean) as PendingMessage[];
         return updated;
       });
     }, 1000);
@@ -273,9 +290,9 @@ export default function App() {
 
     const handleKeyPress = (e: KeyboardEvent) => {
       if (pendingQueue.length === 0) return;
-      
+
       const firstMessage = pendingQueue[0];
-      
+
       if (e.key === "a" || e.key === "A") {
         approveMessage(firstMessage.id);
       } else if (e.key === "r" || e.key === "R") {
@@ -319,7 +336,7 @@ export default function App() {
     setOnlineUsers([]);
     setPendingQueue([]);
     setUsername("");
-    timersRef.current.forEach(timer => clearInterval(timer));
+    timersRef.current.forEach((timer) => clearInterval(timer));
     timersRef.current.clear();
   };
 
@@ -331,38 +348,55 @@ export default function App() {
     });
   };
 
-  // Vista de Login
   if (!isConnected) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-10 left-10 w-32 h-32 bg-amber-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-pulse"></div>
+          <div
+            className="absolute bottom-10 right-10 w-32 h-32 bg-rose-200 rounded-full mix-blend-multiply filter blur-xl opacity-30 animate-pulse"
+            style={{ animationDelay: "700ms" }}
+          ></div>
+        </div>
+
+        <div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-10 w-full max-w-md relative z-10 border-4 border-amber-400">
           <div className="text-center mb-8">
-            <div className="bg-indigo-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
+            <div className="relative inline-block mb-4">
+              <div className="bg-gradient-to-br from-amber-400 to-orange-500 w-20 h-20 rounded-full flex items-center justify-center mx-auto shadow-lg transform hover:scale-110 transition-transform">
+                <span className="text-4xl">👂</span>
+              </div>
+              <div className="absolute -top-1 -right-1 w-6 h-6 bg-rose-500 rounded-full animate-ping"></div>
+              <div className="absolute -top-1 -right-1 w-6 h-6 bg-rose-500 rounded-full"></div>
             </div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">Chat Moderado</h1>
-            <p className="text-gray-600">Ingresa tu nombre para comenzar</p>
+            <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-600 to-rose-600 mb-2">
+              El Chismógrafo
+            </h1>
+            <p className="text-gray-600 font-medium">¡Aquí se habla de todo!</p>
+            <p className="text-sm text-amber-700 mt-2 bg-amber-50 px-3 py-1 rounded-full inline-block">
+              Chat moderado
+            </p>
           </div>
-          <div className="space-y-6">
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Nombre de Usuario</label>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                Tu Apodo
+              </label>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Tu nombre..."
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="Ej: ChismosoAnónimo..."
+                className="w-full px-4 py-3 border-3 border-amber-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-amber-200 focus:border-amber-500 transition-all text-gray-800 placeholder-gray-400 font-medium"
                 maxLength={20}
               />
             </div>
             <button
               onClick={connectToChat}
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-lg"
+              disabled={!username.trim()}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-4 rounded-xl font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none text-lg"
             >
-              Entrar al Chat
+              ¡Entrar al Chisme!
             </button>
           </div>
         </div>
@@ -370,80 +404,113 @@ export default function App() {
     );
   }
 
-  // Vista de Admin
   if (isAdmin) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">Panel de Moderación</h1>
-                <p className="text-gray-600 text-sm mt-1">Mensajes en cola: {pendingQueue.length}</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 p-3 sm:p-4">
+        <div className="max-w-5xl mx-auto">
+          <div className="bg-gradient-to-r from-slate-700 to-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 mb-4 border border-slate-600">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="bg-amber-500 p-2 sm:p-3 rounded-xl">
+                  <span className="text-2xl sm:text-3xl">🔍</span>
+                </div>
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-black text-white">
+                    Panel del Moderador
+                  </h1>
+                  <p className="text-amber-400 text-xs sm:text-sm font-semibold">
+                    Chismes en revisión: {pendingQueue.length}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={disconnectFromChat}
-                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold transition-colors"
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold transition-all shadow-lg text-sm sm:text-base"
               >
                 Salir
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-xl p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-800">Cola de Mensajes</h2>
-              <div className="text-sm text-gray-600">
-                Atajos: <kbd className="px-2 py-1 bg-gray-100 rounded">A</kbd> Aprobar · 
-                <kbd className="px-2 py-1 bg-gray-100 rounded ml-1">R</kbd> Rechazar
+          <div className="bg-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 border border-slate-700">
+            <div className="mb-4 sm:mb-6 flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-lg sm:text-xl font-bold text-white flex items-center space-x-2">
+                <span>📋</span>
+                <span>Cola de Chismes</span>
+              </h2>
+              <div className="text-xs sm:text-sm text-slate-300 bg-slate-700 px-3 py-2 rounded-lg">
+                <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-amber-400">
+                  A
+                </kbd>{" "}
+                Aprobar ·
+                <kbd className="px-2 py-1 bg-slate-600 rounded font-bold text-red-400 ml-1">
+                  R
+                </kbd>{" "}
+                Rechazar
               </div>
             </div>
 
             {pendingQueue.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
-                <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                </svg>
-                <p>No hay mensajes pendientes</p>
+              <div className="text-center py-16 text-slate-400">
+                <div className="text-6xl mb-4">🤐</div>
+                <p className="text-lg font-semibold">
+                  Todo tranquilo por ahora...
+                </p>
+                <p className="text-sm mt-2">
+                  No hay chismes pendientes de revisar
+                </p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {pendingQueue.map((msg, idx) => (
                   <div
                     key={msg.id}
-                    className={`border-2 rounded-xl p-4 ${
-                      idx === 0 ? "border-purple-500 bg-purple-50" : "border-gray-200"
+                    className={`border-3 rounded-xl sm:rounded-2xl p-3 sm:p-4 transition-all ${
+                      idx === 0
+                        ? "border-amber-500 bg-gradient-to-br from-amber-900/20 to-orange-900/20 shadow-lg shadow-amber-500/20"
+                        : "border-slate-600 bg-slate-700/50"
                     }`}
                   >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
-                          <span className="font-semibold text-gray-800">{msg.username}</span>
-                          <span className="text-xs text-gray-500">
+                    <div className="flex items-start justify-between mb-3 gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-2 mb-2">
+                          <span className="font-bold text-amber-400 flex items-center space-x-1">
+                            <span>💬</span>
+                            <span className="truncate">{msg.username}</span>
+                          </span>
+                          <span className="text-xs text-slate-400">
                             {new Date(msg.timestamp).toLocaleTimeString()}
                           </span>
                         </div>
-                        <p className="text-gray-700">{msg.message}</p>
+                        <p className="text-white font-medium break-words text-sm sm:text-base">
+                          {msg.message}
+                        </p>
                       </div>
-                      <div className="ml-4 flex flex-col items-center">
-                        <div className={`text-2xl font-bold ${
-                          msg.remainingTime <= 1 ? "text-red-500" : "text-purple-600"
-                        }`}>
+                      <div className="flex flex-col items-center justify-center min-w-[60px] sm:min-w-[70px]">
+                        <div
+                          className={`text-2xl sm:text-3xl font-black ${
+                            msg.remainingTime <= 1
+                              ? "text-red-500 animate-pulse"
+                              : "text-amber-400"
+                          }`}
+                        >
                           {msg.remainingTime}s
                         </div>
-                        <div className="text-xs text-gray-500">restantes</div>
+                        <div className="text-xs text-slate-400 font-semibold">
+                          quedan
+                        </div>
                       </div>
                     </div>
                     <div className="flex space-x-2">
                       <button
                         onClick={() => approveMessage(msg.id)}
-                        className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 rounded-lg font-semibold transition-colors"
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 sm:py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-green-500/30 text-sm sm:text-base"
                       >
                         ✓ Aprobar {idx === 0 && "(A)"}
                       </button>
                       <button
                         onClick={() => rejectMessage(msg.id)}
-                        className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-semibold transition-colors"
+                        className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 sm:py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-red-500/30 text-sm sm:text-base"
                       >
                         ✕ Rechazar {idx === 0 && "(R)"}
                       </button>
@@ -458,71 +525,129 @@ export default function App() {
     );
   }
 
-  // Vista de Usuario (Chat normal)
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-6xl mx-auto h-[calc(100vh-2rem)] bg-white rounded-2xl shadow-xl overflow-hidden flex">
-        <div className="w-64 bg-gray-50 border-r border-gray-200 p-4 hidden md:block">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-800">En línea</h2>
-            <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
-              {onlineUsers.length}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {onlineUsers.map((user: string, idx: number) => (
-              <div key={idx} className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm text-gray-700">{user}</span>
-              </div>
-            ))}
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 p-2 sm:p-4">
+      <div className="max-w-7xl mx-auto h-[calc(100vh-1rem)] sm:h-[calc(100vh-2rem)] bg-white rounded-xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col sm:flex-row border-4 border-amber-400">
+        <div className="w-full sm:w-64 lg:w-72 bg-gradient-to-b from-amber-100 to-orange-100 border-b sm:border-b-0 sm:border-r-4 border-amber-400 p-3 sm:p-4 max-h-24 sm:max-h-none overflow-hidden sm:overflow-visible">
+          <div className="flex sm:flex-col justify-between items-center sm:items-start">
+            <div className="flex items-center space-x-2 sm:justify-between sm:w-full mb-0 sm:mb-4">
+              <h2 className="text-base sm:text-lg font-black text-amber-800 flex items-center space-x-1">
+                <span className="text-xl">👥</span>
+                <span>Chismosos</span>
+              </h2>
+              <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">
+                {onlineUsers.length}
+              </span>
+            </div>
+            <div className="flex sm:flex-col space-x-2 sm:space-x-0 sm:space-y-2 overflow-x-auto sm:overflow-visible max-w-[60%] sm:max-w-full">
+              {onlineUsers.slice(0, 3).map((user: string, idx: number) => (
+                <div
+                  key={idx}
+                  className="flex items-center space-x-2 bg-white px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg shadow-sm hover:shadow-md transition-shadow whitespace-nowrap"
+                >
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-xs sm:text-sm font-semibold text-gray-700 truncate">
+                    {user}
+                  </span>
+                </div>
+              ))}
+              {onlineUsers.length > 3 && (
+                <div className="text-xs text-amber-700 font-semibold px-2 py-1 hidden sm:block">
+                  +{onlineUsers.length - 3} más...
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col">
-          <div className="bg-indigo-600 text-white p-4 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center">
-                <span className="font-semibold">{username[0]?.toUpperCase()}</span>
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-3 sm:p-4 flex items-center justify-between shadow-lg">
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg flex-shrink-0">
+                <span className="text-lg sm:text-xl font-bold">
+                  {username[0]?.toUpperCase()}
+                </span>
               </div>
-              <div>
-                <h3 className="font-semibold">{username}</h3>
-                <p className="text-xs text-indigo-200">Conectado</p>
+              <div className="min-w-0">
+                <h3 className="font-bold text-sm sm:text-base truncate">
+                  {username}
+                </h3>
+                <p className="text-xs text-amber-100 flex items-center space-x-1">
+                  <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                  <span>Chismeando...</span>
+                </p>
               </div>
             </div>
             <button
               onClick={disconnectFromChat}
-              className="bg-indigo-700 hover:bg-indigo-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="bg-red-600 hover:bg-red-700 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-lg flex-shrink-0"
             >
               Salir
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+          <div
+            className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 bg-gradient-to-b from-amber-50/50 to-orange-50/50"
+            style={{
+              backgroundImage:
+                'url("data:image/svg+xml,%3Csvg width="20" height="20" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M0 0h20v20H0z" fill="none"/%3E%3Cpath d="M10 0L9 9l-9 1 9 1 1 9 1-9 9-1-9-1z" fill="%23fbbf24" fill-opacity="0.05"/%3E%3C/svg%3E")',
+            }}
+          >
+            {messages.length === 0 && (
+              <div className="text-center py-12 text-amber-600">
+                <div className="text-5xl mb-3">👂</div>
+                <p className="font-bold text-lg">¡Comienza el chisme!</p>
+                <p className="text-sm mt-1">Escribe tu primer mensaje...</p>
+              </div>
+            )}
             {messages.map((msg: Message, idx: number) => (
-              <div key={idx} className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
+              <div
+                key={idx}
+                className={`flex ${
+                  msg.isOwn ? "justify-end" : "justify-start"
+                } animate-in slide-in-from-bottom-2 duration-300`}
+              >
                 <div
-                  className={`max-w-xs lg:max-w-md ${
+                  className={`max-w-[85%] sm:max-w-xs lg:max-w-md ${
                     msg.isSystem
-                      ? "bg-gray-200 text-gray-700 text-center px-4 py-2 rounded-full text-sm"
+                      ? "bg-amber-200 text-amber-900 text-center px-4 py-2 rounded-full text-xs sm:text-sm font-semibold shadow-sm"
                       : msg.status === "rejected"
-                      ? "bg-red-500 text-white rounded-2xl rounded-tr-sm opacity-75"
+                      ? "bg-gradient-to-br from-red-500 to-red-600 text-white rounded-2xl rounded-tr-sm opacity-75 shadow-lg"
                       : msg.status === "pending"
-                      ? "bg-gray-400 text-white rounded-2xl rounded-tr-sm animate-pulse"
+                      ? "bg-gradient-to-br from-gray-400 to-gray-500 text-white rounded-2xl rounded-tr-sm animate-pulse shadow-lg"
                       : msg.isOwn
-                      ? "bg-indigo-600 text-white rounded-2xl rounded-tr-sm"
-                      : "bg-white text-gray-800 rounded-2xl rounded-tl-sm shadow-sm"
-                  } px-4 py-2 relative`}
+                      ? "bg-gradient-to-br from-amber-500 to-orange-500 text-white rounded-2xl rounded-tr-sm shadow-lg"
+                      : "bg-white text-gray-800 rounded-2xl rounded-tl-sm shadow-md border-2 border-amber-200"
+                  } px-3 sm:px-4 py-2 sm:py-2.5 relative`}
                 >
                   {!msg.isSystem && (
-                    <div className="text-xs font-semibold mb-1 opacity-80">{msg.username}</div>
+                    <div className="text-xs font-bold mb-1 flex items-center space-x-1">
+                      <span className="opacity-80">{msg.username}</span>
+                    </div>
                   )}
-                  <div className={msg.isSystem ? "" : "mb-1"}>{msg.message}</div>
+                  <div
+                    className={`${
+                      msg.isSystem ? "" : "mb-1"
+                    } text-sm sm:text-base break-words`}
+                  >
+                    {msg.message}
+                  </div>
                   {!msg.isSystem && (
-                    <div className="text-xs opacity-70 text-right flex items-center justify-end space-x-1">
+                    <div
+                      className={`text-xs text-right flex items-center justify-end space-x-1 ${
+                        msg.isOwn ? "opacity-80" : "opacity-60"
+                      }`}
+                    >
                       <span>{formatTime(msg.timestamp)}</span>
-                      {msg.status === "pending" && <span className="ml-1">⏳</span>}
-                      {msg.status === "rejected" && <span className="ml-1">✕</span>}
+                      {msg.status === "pending" && (
+                        <span className="ml-1">⏳</span>
+                      )}
+                      {msg.status === "rejected" && (
+                        <span className="ml-1">✕</span>
+                      )}
+                      {msg.status === "approved" && msg.isOwn && (
+                        <span className="ml-1">✓</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -531,21 +656,23 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="p-4 bg-white border-t border-gray-200">
+          <div className="p-3 sm:p-4 bg-gradient-to-r from-amber-100 to-orange-100 border-t-4 border-amber-400 shadow-lg">
             <div className="flex space-x-2">
               <input
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Escribe un mensaje..."
-                className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="Cuéntanos el chisme... 🗣️"
+                className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 border-3 border-amber-300 rounded-xl focus:outline-none focus:ring-4 focus:ring-amber-200 focus:border-amber-500 transition-all text-sm sm:text-base font-medium placeholder-amber-500/60 shadow-inner"
               />
               <button
                 onClick={sendMessage}
-                className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-md"
+                disabled={!inputMessage.trim()}
+                className="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none text-sm sm:text-base flex-shrink-0"
               >
-                Enviar
+                <span className="hidden sm:inline">Enviar</span>
+                <span className="sm:hidden">📤</span>
               </button>
             </div>
           </div>
@@ -556,5 +683,4 @@ export default function App() {
 }
 
 const root = createRoot(document.getElementById("elysia")!);
-root.render(<App />
-);
+root.render(<App />);
