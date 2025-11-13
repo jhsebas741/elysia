@@ -89,6 +89,7 @@ const app = new Elysia()
   .ws("/chat", {
     open(ws) {
       console.log("Cliente conectado");
+      ws.subscribe("chat")
     },
 
     message(ws, message: ChatMessage) {
@@ -359,6 +360,7 @@ const app = new Elysia()
           });
         }
       }
+      ws.unsubscribe("chat")
     },
   })
   .listen({});
