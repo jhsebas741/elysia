@@ -1,4 +1,3 @@
-import openapi, { fromTypes } from "@elysiajs/openapi";
 import staticPlugin from "@elysiajs/static";
 import { Context, Elysia, t } from "elysia";
 import { Prettify, RouteBase } from "elysia/dist/types";
@@ -68,12 +67,7 @@ const pendingMessages = new Map<string, PendingMessage>();
 const messageHistory: HistoryMessage[] = [];
 let adminWs: Prettify<ElysiaWS<Context, RouteBase>> | null = null;
 
-const app = new Elysia()
-  .use(
-    openapi({
-      references: fromTypes(),
-    })
-  )
+const app = new Elysia()  
   .use(
     await staticPlugin({
       prefix: "/",
